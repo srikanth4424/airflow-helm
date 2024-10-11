@@ -1,0 +1,73 @@
+# Replica settings
+scheduler:
+  replicas: 2
+
+worker:
+  replicas: 2
+
+webserver:
+  replicas: 1
+
+# Internal Docker images
+image:
+  repository: your-internal-registry/airflow  # Update with your image
+  tag: 2.8.0  # Ensure this matches your Airflow version
+
+# NFS Configuration
+nfs:
+  server: nfs-server.example.com  # Update with your NFS server
+  path: /path/to/airflow  # Update with your NFS path
+
+# PostgreSQL Database (Existing)
+database:
+  host: your-db-host  # Update with your DB host
+  port: 5432
+  name: airflow_db
+  user: airflow_user
+  # The password will be retrieved from Vault or Kubernetes Secret
+
+# Redis Configuration
+redis:
+  enabled: true  # Set to false if using an external Redis
+  host: airflow-redis
+  port: 6379
+  password: ""  # Set if Redis requires authentication
+
+# Use Vault for secrets
+vault:
+  enabled: true
+  address: https://vault.example.com  # Update with your Vault address
+  role: airflow-role  # Update with your Vault role
+  path: secret/data/airflow  # Update with your Vault path
+
+# airflow.cfg content
+airflowConfig: |
+  [core]
+  dags_folder = /opt/airflow/dags
+  plugins_folder = /opt/airflow/plugins
+  executor = CeleryExecutor
+  sql_alchemy_conn = postgresql+psycopg2://{{ .Values.database.user }}:{{ "{{ db_password }}" }}@{{ .Values.database.host }}:{{ .Values.database.port }}/{{ .Values.database.name }}
+  [celery]
+  broker_url = redis://{{ if .Values.redis.password }}:{{ "{{ redis_password }}" }}@{{ end }}{{ .Values.redis.host }}:{{ .Values.redis.port }}/0
+  result_backend = db+postgresql://{{ .Values.database.user }}:{{ "{{ db_password }}" }}@{{ .Values.database.host }}:{{ .Values.database.port }}/{{ .Values.database.name }}
+  ...
+
+# Sensitive data (if not using Vault)
+secrets:
+  dbPassword: ""
+  redisPassword: ""
+
+# Annotations for Vault Agent Sidecar (if using Vault)
+vaultAnnotations:
+  vault.hashicorp.com/agent-inject: "true"
+  vault.hashicorp.com/role: "{{ .Values.vault.role }}"
+  vault.hashicorp.com/agent-inject-secret-db-password: "{{ .Values.vault.path }}#db_password"
+  vault.hashicorp.com/agent-inject-secret-redis-password: "{{ .Values.vault.path }}#redis_password"
+  vault.hashicorp.com/agent-inject-template-db-password: |
+    {{- with secret "{{ .Values.vault.path }}" -}}
+    {{ .Data.data.db_password }}
+    {{- end }}
+  vault.hashicorp.com/agent-inject-template-redis-password: |
+    {{- with secret "{{ .Values.vault.path }}" -}}
+    {{ .Data.data.redis_password }}
+    {{- end }}
